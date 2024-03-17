@@ -108,7 +108,7 @@ impl Default for AnimateTransform {
 }
 
 #[derive(Component)]
-struct CursorAttacehement;
+struct CursorAttachement;
 
 #[derive(Component)]
 struct MainCamera;
@@ -250,7 +250,7 @@ fn setup(
             ..Default::default()
         },
         Name::new("Cursor Block"),
-        CursorAttacehement,
+        CursorAttachement,
     ));
 }
 
@@ -283,7 +283,7 @@ fn cursor_system(
 }
 
 fn update_cursor_attachment(
-    mut cursor_attachement: Query<&mut Transform, With<CursorAttacehement>>,
+    mut cursor_attachement: Query<&mut Transform, With<CursorAttachement>>,
     mouse_grid_pos: Res<MouseGridPosition>,
 ) {
     for mut transform in cursor_attachement.iter_mut() {
