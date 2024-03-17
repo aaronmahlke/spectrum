@@ -43,7 +43,16 @@ fn main() {
 
     // systems
     app.add_systems(Startup, (setup, spawn_color_wells));
-    app.add_systems(Update, (cursor_system));
+    app.add_systems(
+        Update,
+        (
+            cursor_system,
+            update_cursor_attachment,
+            place_collector,
+            animate_transform_system,
+            destoy_block_system,
+        ),
+    );
     app.run();
 }
 
@@ -57,7 +66,46 @@ struct GridPosition {
 }
 
 #[derive(Component)]
-struct Cursor;
+struct Active;
+
+#[derive(Component)]
+struct Building;
+
+#[derive(Component)]
+struct Collector;
+
+#[derive(Component)]
+struct BuildBlock;
+
+#[derive(Component)]
+struct AnimateTransform {
+    target_position: Vec3,
+    target_scale: Vec3,
+    duration: f32,
+    elapsed: f32,
+}
+
+#[derive(Component)]
+struct AnimateMaterial {
+    target_color: Color,
+    target_emissive: Color,
+    duration: f32,
+    elapsed: f32,
+}
+
+impl Default for AnimateTransform {
+    fn default() -> Self {
+        Self {
+            target_scale: Vec3::splat(1.0),
+            target_position: Vec3::ZERO,
+            duration: 0.5,
+            elapsed: 0.0,
+        }
+    }
+}
+
+#[derive(Component)]
+struct CursorAttacehement;
 
 #[derive(Component)]
 struct MainCamera;
@@ -67,6 +115,19 @@ struct MouseWorldPosition(Vec2);
 
 #[derive(Resource, Default)]
 struct MouseGridPosition(Vec2);
+
+#[derive(Component)]
+struct ColorWell {
+    color: Color,
+}
+
+impl Default for ColorWell {
+    fn default() -> Self {
+        Self {
+            color: Color::ORANGE_RED,
+        }
+    }
+}
 
 fn spawn_color_wells(
     mut commands: Commands,
@@ -78,7 +139,7 @@ fn spawn_color_wells(
             let should_spawn = rand::random::<f32>();
             let position = Vec3::new(x as f32 * GRID_SCALE, -0.49, y as f32 * GRID_SCALE);
             let color = Color::ORANGE_RED;
-            let chance = 0.05;
+            let chance = 0.03;
             if should_spawn > chance {
                 continue;
             }
@@ -88,13 +149,14 @@ fn spawn_color_wells(
                     material: materials.add(StandardMaterial {
                         base_color: color,
                         reflectance: 0.5,
-                        emissive: color * 20.0,
+                        emissive: color * 5.0,
                         ..default()
                     }),
                     transform: Transform::from_translation(position),
                     ..Default::default()
                 },
                 GridPosition { x, y },
+                ColorWell { color },
                 Name::new("Color Well"),
             ));
         }
@@ -207,28 +269,23 @@ fn setup(
             ..Default::default()
         },
         Name::new("Cursor Block"),
-        Cursor,
+        CursorAttacehement,
     ));
 }
 
 fn cursor_system(
-    mut commands: Commands,
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    mut q_cursor_block: Query<&mut Transform, With<Cursor>>,
     mut mouse_world_position: ResMut<MouseWorldPosition>,
     mut mouse_grid_position: ResMut<MouseGridPosition>,
 ) {
     let (camera, camera_transform) = q_camera.single();
     let window = q_window.single();
 
-    let mut cursor_transform = q_cursor_block.single_mut();
-
     if let Some(world_position) = window
         .cursor_position()
         .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
         .map(|ray| {
-            println!("ray: {:?}", ray);
             // get the intersection of the ray with the xz plane on y=0
             // t is the distance from the ray origin to the intersection point
             let t = -ray.origin.y / ray.direction.y;
@@ -239,20 +296,24 @@ fn cursor_system(
             )
         })
     {
-        println!("world_position: {:?}", world_position);
-        println!(
-            "grid_position: {:?}",
-            world_to_grid(Vec2::new(world_position.x, world_position.z))
-        );
-
         mouse_world_position.0 = Vec2::new(world_position.x, world_position.z);
         mouse_grid_position.0 = world_to_grid(Vec2::new(world_position.x, world_position.z));
+    }
+}
 
-        // slowly move the cursor block to the target position
-        let grid_position = world_to_grid(Vec2::new(world_position.x, world_position.z));
-        cursor_transform.translation = cursor_transform
-            .translation
-            .lerp(Vec3::new(grid_position.x, 0.0, grid_position.y), 0.1);
+fn update_cursor_attachment(
+    mut cursor_attachement: Query<&mut Transform, With<CursorAttacehement>>,
+    mouse_grid_pos: Res<MouseGridPosition>,
+) {
+    for mut transform in cursor_attachement.iter_mut() {
+        transform.translation = transform.translation.lerp(
+            Vec3::new(
+                mouse_grid_pos.0.x,
+                transform.translation.y,
+                mouse_grid_pos.0.y,
+            ),
+            0.1,
+        );
     }
 }
 
@@ -261,4 +322,108 @@ fn world_to_grid(world_position: Vec2) -> Vec2 {
         (world_position.x / GRID_SCALE).round(),
         (world_position.y / GRID_SCALE).round(),
     )
+}
+
+fn grid_to_world(grid_position: Vec2) -> Vec2 {
+    Vec2::new(grid_position.x * GRID_SCALE, grid_position.y * GRID_SCALE)
+}
+
+fn place_collector(
+    mut commands: Commands,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mouse_grid_pos: Res<MouseGridPosition>,
+    mut q_grid_pos: Query<(Entity, &GridPosition, &mut Handle<StandardMaterial>), With<ColorWell>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if buttons.just_pressed(MouseButton::Left) {
+        // Left button was pressed
+        for (well_entity, grid_pos, mut mat_handle) in &mut q_grid_pos {
+            if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
+                commands.entity(well_entity).insert(Active);
+
+                commands.spawn((
+                    PbrBundle {
+                        mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
+                        material: materials.add(StandardMaterial {
+                            base_color: Color::WHITE,
+                            reflectance: 0.5,
+                            ..default()
+                        }),
+                        transform: Transform::from_translation(Vec3::new(
+                            grid_pos.x as f32 * GRID_SCALE,
+                            -1.0,
+                            grid_pos.y as f32 * GRID_SCALE,
+                        ))
+                        .with_scale(Vec3::splat(0.9)),
+                        ..Default::default()
+                    },
+                    AnimateTransform {
+                        target_position: Vec3::new(
+                            grid_pos.x as f32 * GRID_SCALE,
+                            0.5,
+                            grid_pos.y as f32 * GRID_SCALE,
+                        ),
+                        target_scale: Vec3::splat(1.0),
+                        duration: 1.5,
+                        ..default()
+                    },
+                    GridPosition {
+                        x: grid_pos.x,
+                        y: grid_pos.y,
+                    },
+                    Building,
+                    Collector,
+                    Name::new("Collector"),
+                ));
+            }
+        }
+    }
+}
+
+fn animate_transform_system(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut AnimateTransform, &mut Transform)>,
+) {
+    for (entity, mut animation, mut transform) in query.iter_mut() {
+        animation.elapsed += time.delta_seconds();
+        let t = animation.elapsed / animation.duration;
+        if t >= 1.0 {
+            commands.entity(entity).remove::<AnimateTransform>();
+        } else {
+            transform.translation = transform.translation.lerp(animation.target_position, t);
+            transform.scale = transform.scale.lerp(animation.target_scale, t);
+        }
+    }
+}
+
+fn destoy_block_system(
+    mut commands: Commands,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mouse_grid_pos: Res<MouseGridPosition>,
+    q_grid_pos: Query<(Entity, &GridPosition), (With<Building>, Without<ColorWell>)>,
+) {
+    if buttons.just_pressed(MouseButton::Right) {
+        println!("Right button was pressed");
+        for (entity, grid_pos) in &q_grid_pos {
+            println!(
+                "Build block found at grid position {:?}, {:?}",
+                grid_pos.x, grid_pos.y
+            );
+            if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
+                commands.entity(entity).insert(AnimateTransform {
+                    target_scale: Vec3::splat(0.0),
+                    target_position: Vec3::new(
+                        grid_pos.x as f32 * GRID_SCALE,
+                        -0.5,
+                        grid_pos.y as f32 * GRID_SCALE,
+                    ),
+                    duration: 0.5,
+                    elapsed: 0.0,
+                    ..default()
+                });
+            }
+        }
+    }
 }
