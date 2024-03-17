@@ -2,14 +2,9 @@
 
 use bevy::utils::HashMap;
 use bevy::{
-    core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::FrameTimeDiagnosticsPlugin,
     pbr::PointLightShadowMap,
     prelude::*,
-    render::{
-        camera::{Exposure, ScalingMode},
-        view::ColorGrading,
-    },
     window::{PresentMode, PrimaryWindow},
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
