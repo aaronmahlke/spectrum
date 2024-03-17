@@ -44,9 +44,11 @@ fn main() {
         .insert_resource(MouseWorldPosition(Vec2::ZERO))
         .insert_resource(MouseGridPosition(Vec2::ZERO))
         .insert_resource(GridMap::default());
+    app.insert_state(AppState::InGame);
 
     // systems
-    app.add_systems(OnEnter(AppState::InGame), (setup, spawn_color_wells));
+    app.add_systems(Startup, setup);
+    app.add_systems(OnEnter(AppState::InGame), (spawn_color_wells));
     app.add_systems(
         Update,
         (
