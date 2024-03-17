@@ -358,6 +358,7 @@ fn cursor_system(
 }
 
 fn update_cursor_attachment(
+    time: Res<Time>,
     mut cursor_attachement: Query<&mut Transform, With<CursorAttachment>>,
     mouse_grid_pos: Res<MouseGridPosition>,
 ) {
@@ -368,7 +369,7 @@ fn update_cursor_attachment(
                 transform.translation.y,
                 mouse_grid_pos.0.y,
             ),
-            0.1,
+            time.delta_seconds()*15.,
         );
     }
 }
