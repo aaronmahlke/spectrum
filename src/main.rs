@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+use bevy::utils::HashMap;
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::FrameTimeDiagnosticsPlugin,
@@ -11,12 +12,11 @@ use bevy::{
     },
     window::{PresentMode, PrimaryWindow},
 };
-use bevy::utils::HashMap;
 use bevy_inspector_egui::InspectorOptions;
 
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use rand::random;
 use fps::FPSPlugin;
+use rand::random;
 mod fps;
 
 fn main() {
@@ -53,7 +53,7 @@ fn main() {
 
     // systems
     app.add_systems(Startup, setup);
-    app.add_systems(OnEnter(AppState::InGame), (spawn_color_wells));
+    app.add_systems(OnEnter(AppState::InGame), spawn_color_wells);
     app.add_systems(
         Update,
         (
@@ -169,17 +169,17 @@ impl Default for ColorWell {
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 enum GridLayer {
     Ground,
-    Build
+    Build,
 }
 #[derive(Resource)]
 struct GridMap {
-    map: HashMap<(GridLayer, GridPosition), Entity>
+    map: HashMap<(GridLayer, GridPosition), Entity>,
 }
 
 impl Default for GridMap {
     fn default() -> Self {
         Self {
-            map: HashMap::default()
+            map: HashMap::default(),
         }
     }
 }
@@ -218,34 +218,28 @@ fn spawn_color_wells(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    for x in -GRID_SIZE..GRID_SIZE {
-        for y in -GRID_SIZE..GRID_SIZE {
-            let should_spawn = rand::random::<f32>();
-            let position = Vec3::new(x as f32 * GRID_SCALE, -0.49, y as f32 * GRID_SCALE);
-            let color = Color::ORANGE_RED;
-            let chance = 0.03;
-            if should_spawn > chance {
-                continue;
-            }
-            let e = commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-                    material: materials.add(StandardMaterial {
-                        base_color: color,
-                        reflectance: 0.5,
-                        emissive: color * 10.0,
-                        ..default()
-                    }),
-                    transform: Transform::from_translation(position),
-                    ..Default::default()
-                },
-                GridPosition { x, y },
-                ColorWell { color },
-                Name::new("Color Well"),
-            ));
-            grid_map.set(GridLayer::Ground, GridPosition { x, y }, e.id()).unwrap();
-        }
-    }
+    let should_spawn = rand::random::<f32>();
+    let position = Vec3::new(0.0 * GRID_SCALE, -0.49, 0.0 * GRID_SCALE);
+    let color = Color::ORANGE_RED;
+    let e = commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+            material: materials.add(StandardMaterial {
+                base_color: color,
+                reflectance: 0.5,
+                emissive: color * 10.0,
+                ..default()
+            }),
+            transform: Transform::from_translation(position),
+            ..Default::default()
+        },
+        GridPosition { x: 0, y: 0 },
+        ColorWell { color },
+        Name::new("Color Well"),
+    ));
+    grid_map
+        .set(GridLayer::Ground, GridPosition { x: 0, y: 0 }, e.id())
+        .unwrap();
 }
 
 fn setup(
@@ -376,7 +370,7 @@ fn update_cursor_attachment(
                 transform.translation.y,
                 mouse_grid_pos.0.y,
             ),
-            time.delta_seconds()*15.,
+            time.delta_seconds() * 15.,
         );
     }
 }
@@ -400,7 +394,10 @@ fn place_collector(
     mut grid_map: ResMut<GridMap>,
     buttons: Res<ButtonInput<MouseButton>>,
     mouse_grid_pos: Res<MouseGridPosition>,
-    mut inactive_color_wells: Query<(Entity, &GridPosition, &mut Handle<StandardMaterial>), (With<ColorWell>)>,
+    mut inactive_color_wells: Query<
+        (Entity, &GridPosition, &mut Handle<StandardMaterial>),
+        (With<ColorWell>),
+    >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -416,10 +413,49 @@ fn place_collector(
                     return;
                 }
 
-                let mut collector = commands
-                    .spawn((
+                let mut collector = commands.spawn((
+                    PbrBundle {
+                        mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
+                        material: materials.add(StandardMaterial {
+                            base_color: Color::WHITE,
+                            reflectance: 0.5,
+                            diffuse_transmission: 0.5,
+                            specular_transmission: 1.0,
+                            perceptual_roughness: 0.5,
+                            thickness: 4.0,
+                            ior: 1.18,
+                            ..default()
+                        }),
+                        transform: Transform::from_translation(Vec3::new(
+                            inactive_color_well.1.x as f32 * GRID_SCALE,
+                            -0.4,
+                            inactive_color_well.1.y as f32 * GRID_SCALE,
+                        )),
+                        ..Default::default()
+                    },
+                    AnimateTransform {
+                        target_position: Vec3::new(
+                            inactive_color_well.1.x as f32 * GRID_SCALE,
+                            0.5,
+                            inactive_color_well.1.y as f32 * GRID_SCALE,
+                        ),
+                        target_scale: Vec3::splat(1.0),
+                        duration: 1.5,
+                        ..default()
+                    },
+                    GridPosition {
+                        x: inactive_color_well.1.x,
+                        y: inactive_color_well.1.y,
+                    },
+                    Building,
+                    Collector,
+                    Name::new("Collector"),
+                ));
+                collector.with_children(|parent| {
+                    let laser_length = 10.0;
+                    parent.spawn((
                         PbrBundle {
-                            mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
+                            mesh: meshes.add(Cylinder::new(0.5, 2.0).mesh().resolution(50)),
                             material: materials.add(StandardMaterial {
                                 base_color: Color::WHITE,
                                 reflectance: 0.5,
@@ -428,67 +464,31 @@ fn place_collector(
                                 perceptual_roughness: 0.5,
                                 thickness: 4.0,
                                 ior: 1.18,
+                                emissive: Color::ORANGE_RED * 40.0,
                                 ..default()
                             }),
-                            transform: Transform::from_translation(Vec3::new(
-                                inactive_color_well.1.x as f32 * GRID_SCALE,
-                                -0.4,
-                                inactive_color_well.1.y as f32 * GRID_SCALE,
-                            )),
+                            transform: Transform::from_translation(Vec3::new(0.0, 0.25, 0.0))
+                                .with_scale(Vec3::new(0.04, 0.0, 0.06))
+                                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                             ..Default::default()
                         },
                         AnimateTransform {
-                            target_position: Vec3::new(
-                                inactive_color_well.1.x as f32 * GRID_SCALE,
-                                0.5,
-                                inactive_color_well.1.y as f32 * GRID_SCALE,
-                            ),
-                            target_scale: Vec3::splat(1.0),
-                            duration: 1.5,
-                            ..default()
+                            target_scale: Vec3::new(0.03, laser_length, 0.04),
+                            target_position: Vec3::new(0.0, 0.2, laser_length + 0.5),
+                            duration: 2.5,
+                            ..Default::default()
                         },
-                        GridPosition {
-                            x: inactive_color_well.1.x,
-                            y: inactive_color_well.1.y,
-                        },
-                        Building,
-                        Collector,
-                        Name::new("Collector"),
+                        Laser,
+                        Name::new("Collector Laser"),
                     ));
-                    collector.with_children(|parent| {
-                        let laser_length = 10.0;
-                        parent.spawn((
-                            PbrBundle {
-                                mesh: meshes.add(Cylinder::new(0.5, 2.0).mesh().resolution(50)),
-                                material: materials.add(StandardMaterial {
-                                    base_color: Color::WHITE,
-                                    reflectance: 0.5,
-                                    diffuse_transmission: 0.5,
-                                    specular_transmission: 1.0,
-                                    perceptual_roughness: 0.5,
-                                    thickness: 4.0,
-                                    ior: 1.18,
-                                    emissive: Color::ORANGE_RED * 40.0,
-                                    ..default()
-                                }),
-                                transform: Transform::from_translation(Vec3::new(0.0, 0.25, 0.0))
-                                    .with_scale(Vec3::new(0.04, 0.0, 0.06))
-                                    .with_rotation(Quat::from_rotation_x(
-                                        -std::f32::consts::FRAC_PI_2,
-                                    )),
-                                ..Default::default()
-                            },
-                            AnimateTransform {
-                                target_scale: Vec3::new(0.03, laser_length, 0.04),
-                                target_position: Vec3::new(0.0, 0.2, laser_length + 0.5),
-                                duration: 2.5,
-                                ..Default::default()
-                            },
-                            Laser,
-                            Name::new("Collector Laser"),
-                        ));
-                    });
-                grid_map.set(GridLayer::Build, GridPosition::from(mouse_grid_pos.0), collector.id()).unwrap();
+                });
+                grid_map
+                    .set(
+                        GridLayer::Build,
+                        GridPosition::from(mouse_grid_pos.0),
+                        collector.id(),
+                    )
+                    .unwrap();
             }
         }
     }
@@ -520,14 +520,9 @@ fn animate_transform_system(
     }
 }
 
-fn animate_laser(
-    time: Res<Time>,
-    mut query: Query<&mut Transform, With<Laser>>,
-) {
+fn animate_laser(time: Res<Time>, mut query: Query<&mut Transform, With<Laser>>) {
     for mut transform in &mut query {
-        transform.rotation *= Quat::from_rotation_y(
-           time.delta_seconds() * 5. * random::<f32>()
-        );
+        transform.rotation *= Quat::from_rotation_y(time.delta_seconds() * 5. * random::<f32>());
     }
 }
 
@@ -556,17 +551,20 @@ fn destroy_block_system(
         println!("Right button was pressed");
         let grid_pos = GridPosition::from(mouse_grid_pos.0);
         if let Some(entity) = grid_map.get(GridLayer::Build, grid_pos) {
-            commands.entity(*entity).insert((AnimateTransform {
-                target_scale: Vec3::splat(0.0),
-                target_position: Vec3::new(
-                    grid_pos.x as f32 * GRID_SCALE,
-                    -0.5,
-                    grid_pos.y as f32 * GRID_SCALE,
-                ),
-                duration: 0.5,
-                elapsed: 0.0,
-                ..default()
-            }, DeletionPending));
+            commands.entity(*entity).insert((
+                AnimateTransform {
+                    target_scale: Vec3::splat(0.0),
+                    target_position: Vec3::new(
+                        grid_pos.x as f32 * GRID_SCALE,
+                        -0.5,
+                        grid_pos.y as f32 * GRID_SCALE,
+                    ),
+                    duration: 0.5,
+                    elapsed: 0.0,
+                    ..default()
+                },
+                DeletionPending,
+            ));
         }
     }
 }
