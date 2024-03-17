@@ -12,11 +12,13 @@ use bevy::{
     },
     window::{PresentMode, PrimaryWindow},
 };
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use bevy_inspector_egui::InspectorOptions;
 
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use camera::{CameraPlugin, MainCamera};
 use fps::FPSPlugin;
 use rand::random;
+mod camera;
 mod fps;
 
 fn main() {
@@ -33,7 +35,8 @@ fn main() {
         ..default()
     }))
     .add_plugins(WorldInspectorPlugin::new())
-    .add_plugins((FPSPlugin, FrameTimeDiagnosticsPlugin));
+    .add_plugins((FPSPlugin, FrameTimeDiagnosticsPlugin))
+    .add_plugins(CameraPlugin);
 
     // resources
     app.insert_resource(ClearColor(Color::BLACK))
@@ -74,7 +77,6 @@ fn main() {
     app.run();
 }
 
-const GRID_SIZE: i32 = 10;
 const GRID_SCALE: f32 = 1.0;
 
 // define the game state
@@ -144,9 +146,6 @@ impl Default for AnimateTransform {
 #[derive(Component)]
 struct CursorAttachment;
 
-#[derive(Component)]
-struct MainCamera;
-
 #[derive(Resource, Default)]
 struct MouseWorldPosition(Vec2);
 
@@ -171,17 +170,9 @@ enum GridLayer {
     Ground,
     Build,
 }
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct GridMap {
     map: HashMap<(GridLayer, GridPosition), Entity>,
-}
-
-impl Default for GridMap {
-    fn default() -> Self {
-        Self {
-            map: HashMap::default(),
-        }
-    }
 }
 
 impl GridMap {
@@ -280,32 +271,6 @@ fn setup(
             ..default()
         },
         Name::new("Floor"),
-    ));
-
-    // camera
-    commands.spawn((
-        Camera3dBundle {
-            camera: Camera {
-                hdr: true,
-                ..default()
-            },
-            transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-            projection: Projection::Orthographic(OrthographicProjection {
-                scaling_mode: ScalingMode::FixedVertical(6.0),
-                ..default()
-            }),
-            color_grading: ColorGrading {
-                post_saturation: 1.2,
-                ..default()
-            },
-            tonemapping: Tonemapping::TonyMcMapface,
-            exposure: Exposure { ev100: 6.0 },
-            ..default()
-        },
-        BloomSettings {
-            ..Default::default()
-        },
-        MainCamera,
     ));
 
     // spawn cursor block
