@@ -149,7 +149,7 @@ fn spawn_color_wells(
                     material: materials.add(StandardMaterial {
                         base_color: color,
                         reflectance: 0.5,
-                        emissive: color * 5.0,
+                        emissive: color * 10.0,
                         ..default()
                     }),
                     transform: Transform::from_translation(position),
@@ -176,10 +176,10 @@ fn setup(
         DirectionalLightBundle {
             directional_light: DirectionalLight {
                 shadows_enabled: true,
-                illuminance: 500.0,
+                illuminance: 300.0,
                 ..default()
             },
-            transform: Transform::from_xyz(0.0, 1.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(10.0, 10.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         },
         Name::new("Directional Light"),
@@ -187,7 +187,7 @@ fn setup(
 
     // Floor
     let floor_mat = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.0, 0.0, 0.0),
+        base_color: Color::rgb(0.03, 0.03, 0.03),
         reflectance: 0.0,
         perceptual_roughness: 1.0,
         ..default()
@@ -348,14 +348,18 @@ fn place_collector(
                         material: materials.add(StandardMaterial {
                             base_color: Color::WHITE,
                             reflectance: 0.5,
+                            diffuse_transmission: 0.5,
+                            specular_transmission: 1.0,
+                            perceptual_roughness: 0.5,
+                            thickness: 4.0,
+                            ior: 1.18,
                             ..default()
                         }),
                         transform: Transform::from_translation(Vec3::new(
                             grid_pos.x as f32 * GRID_SCALE,
-                            -1.0,
+                            -0.4,
                             grid_pos.y as f32 * GRID_SCALE,
-                        ))
-                        .with_scale(Vec3::splat(0.9)),
+                        )),
                         ..Default::default()
                     },
                     AnimateTransform {
