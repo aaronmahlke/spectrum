@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::FrameTimeDiagnosticsPlugin,
@@ -42,7 +44,7 @@ fn main() {
         .insert_resource(MouseGridPosition(Vec2::ZERO));
 
     // systems
-    app.add_systems(Startup, (setup, spawn_color_wells));
+    app.add_systems(OnEnter(AppState::InGame), (setup, spawn_color_wells));
     app.add_systems(
         Update,
         (
@@ -51,13 +53,21 @@ fn main() {
             place_collector,
             animate_transform_system,
             destoy_block_system,
-        ),
+        )
+            .run_if(in_state(AppState::InGame)),
     );
     app.run();
 }
 
 const GRID_SIZE: i32 = 10;
 const GRID_SCALE: f32 = 1.0;
+
+// define the game state
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum AppState {
+    #[default]
+    InGame,
+}
 
 #[derive(Component)]
 struct GridPosition {
@@ -108,7 +118,7 @@ impl Default for AnimateTransform {
 }
 
 #[derive(Component)]
-struct CursorAttachement;
+struct CursorAttachment;
 
 #[derive(Component)]
 struct MainCamera;
@@ -250,7 +260,7 @@ fn setup(
             ..Default::default()
         },
         Name::new("Cursor Block"),
-        CursorAttachement,
+        CursorAttachment,
     ));
 }
 
@@ -283,7 +293,7 @@ fn cursor_system(
 }
 
 fn update_cursor_attachment(
-    mut cursor_attachement: Query<&mut Transform, With<CursorAttachement>>,
+    mut cursor_attachement: Query<&mut Transform, With<CursorAttachment>>,
     mouse_grid_pos: Res<MouseGridPosition>,
 ) {
     for mut transform in cursor_attachement.iter_mut() {
@@ -305,25 +315,27 @@ fn world_to_grid(world_position: Vec2) -> Vec2 {
     )
 }
 
-fn grid_to_world(grid_position: Vec2) -> Vec2 {
-    Vec2::new(grid_position.x * GRID_SCALE, grid_position.y * GRID_SCALE)
+fn grid_to_world(grid_position: &GridPosition) -> Vec2 {
+    Vec2::new(
+        grid_position.x as f32 * GRID_SCALE,
+        grid_position.y as f32 * GRID_SCALE,
+    )
 }
 
 fn place_collector(
     mut commands: Commands,
     buttons: Res<ButtonInput<MouseButton>>,
     mouse_grid_pos: Res<MouseGridPosition>,
-    mut q_grid_pos: Query<(Entity, &GridPosition, &mut Handle<StandardMaterial>), With<ColorWell>>,
+    mut q_grid_pos: Query<(Entity, &GridPosition), With<ColorWell>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if buttons.just_pressed(MouseButton::Left) {
-        // Left button was pressed
-        for (well_entity, grid_pos, mut mat_handle) in &mut q_grid_pos {
+        for (well_entity, grid_pos) in &mut q_grid_pos {
             if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
                 commands.entity(well_entity).insert(Active);
-
-                let collector = commands
+                let world_pos = grid_to_world(grid_pos);
+                commands
                     .spawn((
                         PbrBundle {
                             mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
@@ -338,18 +350,14 @@ fn place_collector(
                                 ..default()
                             }),
                             transform: Transform::from_translation(Vec3::new(
-                                grid_pos.x as f32 * GRID_SCALE,
+                                world_pos.x,
                                 -0.4,
-                                grid_pos.y as f32 * GRID_SCALE,
+                                world_pos.y,
                             )),
                             ..Default::default()
                         },
                         AnimateTransform {
-                            target_position: Vec3::new(
-                                grid_pos.x as f32 * GRID_SCALE,
-                                0.5,
-                                grid_pos.y as f32 * GRID_SCALE,
-                            ),
+                            target_position: Vec3::new(world_pos.x, 0.5, world_pos.y),
                             target_scale: Vec3::splat(1.0),
                             duration: 1.5,
                             ..default()
@@ -435,7 +443,6 @@ fn destoy_block_system(
                         grid_pos.y as f32 * GRID_SCALE,
                     ),
                     duration: 0.5,
-                    elapsed: 0.0,
                     ..default()
                 });
             }
