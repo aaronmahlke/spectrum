@@ -11,6 +11,7 @@ use bevy::{
     },
     window::{PresentMode, PrimaryWindow},
 };
+use bevy::utils::HashMap;
 
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use fps::FPSPlugin;
@@ -23,7 +24,7 @@ fn main() {
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "bevyaac".into(),
-            present_mode: PresentMode::Immediate,
+            present_mode: PresentMode::AutoNoVsync,
             prevent_default_event_handling: false,
             ..default()
         }),
@@ -41,7 +42,8 @@ fn main() {
         })
         .insert_resource(Msaa::default())
         .insert_resource(MouseWorldPosition(Vec2::ZERO))
-        .insert_resource(MouseGridPosition(Vec2::ZERO));
+        .insert_resource(MouseGridPosition(Vec2::ZERO))
+        .insert_resource(GridMap::default());
 
     // systems
     app.add_systems(OnEnter(AppState::InGame), (setup, spawn_color_wells));
@@ -69,10 +71,19 @@ enum AppState {
     InGame,
 }
 
-#[derive(Component)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Hash)]
 struct GridPosition {
     x: i32,
     y: i32,
+}
+
+impl From<Vec2> for GridPosition {
+    fn from(v: Vec2) -> Self {
+        Self {
+            x: v.x as i32,
+            y: v.y as i32,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -96,6 +107,7 @@ struct AnimateTransform {
     target_scale: Vec3,
     duration: f32,
     elapsed: f32,
+    despawn_on_complete: bool,
 }
 
 #[derive(Component)]
@@ -113,6 +125,7 @@ impl Default for AnimateTransform {
             target_position: Vec3::ZERO,
             duration: 0.5,
             elapsed: 0.0,
+            despawn_on_complete: false,
         }
     }
 }
@@ -142,7 +155,54 @@ impl Default for ColorWell {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+enum GridLayer {
+    Ground,
+    Build
+}
+#[derive(Resource)]
+struct GridMap {
+    map: HashMap<(GridLayer, GridPosition), Entity>
+}
+
+impl Default for GridMap {
+    fn default() -> Self {
+        Self {
+            map: HashMap::default()
+        }
+    }
+}
+
+impl GridMap {
+    fn get(&self, layer: GridLayer, position: GridPosition) -> Option<&Entity> {
+        self.map.get(&(layer, position))
+    }
+
+    fn set(&mut self, layer: GridLayer, position: GridPosition, value: Entity) -> Result<(), ()> {
+        if self.map.contains_key(&(layer.clone(), position.clone())) {
+            return Err(());
+        }
+
+        self.map.insert((layer, position), value);
+        Ok(())
+    }
+
+    fn remove(&mut self, layer: GridLayer, position: GridPosition) -> Result<(), ()> {
+        if !self.map.contains_key(&(layer.clone(), position.clone())) {
+            return Err(());
+        }
+
+        self.map.remove(&(layer, position));
+        Ok(())
+    }
+
+    fn contains(&self, layer: GridLayer, position: GridPosition) -> bool {
+        self.map.contains_key(&(layer, position))
+    }
+}
+
 fn spawn_color_wells(
+    mut grid_map: ResMut<GridMap>,
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -156,7 +216,7 @@ fn spawn_color_wells(
             if should_spawn > chance {
                 continue;
             }
-            commands.spawn((
+            let e = commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
                     material: materials.add(StandardMaterial {
@@ -172,6 +232,7 @@ fn spawn_color_wells(
                 ColorWell { color },
                 Name::new("Color Well"),
             ));
+            grid_map.set(GridLayer::Ground, GridPosition { x, y }, e.id()).unwrap();
         }
     }
 }
@@ -324,18 +385,26 @@ fn grid_to_world(grid_position: &GridPosition) -> Vec2 {
 
 fn place_collector(
     mut commands: Commands,
+    mut grid_map: ResMut<GridMap>,
     buttons: Res<ButtonInput<MouseButton>>,
     mouse_grid_pos: Res<MouseGridPosition>,
-    mut q_grid_pos: Query<(Entity, &GridPosition), With<ColorWell>>,
+    mut inactive_color_wells: Query<(Entity, &GridPosition, &mut Handle<StandardMaterial>), (With<ColorWell>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Left button was pressed
     if buttons.just_pressed(MouseButton::Left) {
-        for (well_entity, grid_pos) in &mut q_grid_pos {
-            if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
-                commands.entity(well_entity).insert(Active);
-                let world_pos = grid_to_world(grid_pos);
-                commands
+        // get the color well at the mouse position, if any
+        let grid_map_entity = grid_map.get(GridLayer::Ground, GridPosition::from(mouse_grid_pos.0));
+        if let Some(grid_map_entity) = grid_map_entity {
+            if let Ok(inactive_color_well) = inactive_color_wells.get(*grid_map_entity) {
+                commands.entity(inactive_color_well.0).insert(Active);
+
+                if grid_map.contains(GridLayer::Build, GridPosition::from(mouse_grid_pos.0)) {
+                    return;
+                }
+
+                let mut collector = commands
                     .spawn((
                         PbrBundle {
                             mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
@@ -350,27 +419,31 @@ fn place_collector(
                                 ..default()
                             }),
                             transform: Transform::from_translation(Vec3::new(
-                                world_pos.x,
+                                inactive_color_well.1.x as f32 * GRID_SCALE,
                                 -0.4,
-                                world_pos.y,
+                                inactive_color_well.1.y as f32 * GRID_SCALE,
                             )),
                             ..Default::default()
                         },
                         AnimateTransform {
-                            target_position: Vec3::new(world_pos.x, 0.5, world_pos.y),
+                            target_position: Vec3::new(
+                                inactive_color_well.1.x as f32 * GRID_SCALE,
+                                0.5,
+                                inactive_color_well.1.y as f32 * GRID_SCALE,
+                            ),
                             target_scale: Vec3::splat(1.0),
                             duration: 1.5,
                             ..default()
                         },
                         GridPosition {
-                            x: grid_pos.x,
-                            y: grid_pos.y,
+                            x: inactive_color_well.1.x,
+                            y: inactive_color_well.1.y,
                         },
                         Building,
                         Collector,
                         Name::new("Collector"),
-                    ))
-                    .with_children(|parent| {
+                    ));
+                    collector.with_children(|parent| {
                         let laser_length = 10.0;
                         parent.spawn((
                             PbrBundle {
@@ -403,6 +476,7 @@ fn place_collector(
                             Name::new("Collector Laser"),
                         ));
                     });
+                grid_map.set(GridLayer::Build, GridPosition::from(mouse_grid_pos.0), collector.id()).unwrap();
             }
         }
     }
@@ -410,14 +484,21 @@ fn place_collector(
 
 fn animate_transform_system(
     time: Res<Time>,
+    mut grid_map: ResMut<GridMap>,
     mut commands: Commands,
-    mut query: Query<(Entity, &mut AnimateTransform, &mut Transform)>,
+    mut query: Query<(Entity, &mut AnimateTransform, &mut Transform, &GridPosition)>,
 ) {
-    for (entity, mut animation, mut transform) in query.iter_mut() {
+    for (entity, mut animation, mut transform, grid_position) in query.iter_mut() {
         animation.elapsed += time.delta_seconds();
         let t = animation.elapsed / animation.duration;
         if t >= 1.0 {
             commands.entity(entity).remove::<AnimateTransform>();
+
+            if animation.despawn_on_complete {
+                grid_map.remove(GridLayer::Build, *grid_position).unwrap();
+                commands.entity(entity)
+                    .despawn();
+            }
         } else {
             transform.translation = transform.translation.lerp(animation.target_position, t);
             transform.scale = transform.scale.lerp(animation.target_scale, t);
@@ -427,25 +508,27 @@ fn animate_transform_system(
 
 fn destoy_block_system(
     mut commands: Commands,
+    grid_map: Res<GridMap>,
     buttons: Res<ButtonInput<MouseButton>>,
     mouse_grid_pos: Res<MouseGridPosition>,
     q_grid_pos: Query<(Entity, &GridPosition), (With<Building>, Without<ColorWell>)>,
 ) {
     if buttons.just_pressed(MouseButton::Right) {
         println!("Right button was pressed");
-        for (entity, grid_pos) in &q_grid_pos {
-            if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
-                commands.entity(entity).insert(AnimateTransform {
-                    target_scale: Vec3::splat(0.0),
-                    target_position: Vec3::new(
-                        grid_pos.x as f32 * GRID_SCALE,
-                        -0.5,
-                        grid_pos.y as f32 * GRID_SCALE,
-                    ),
-                    duration: 0.5,
-                    ..default()
-                });
-            }
+        let grid_pos = GridPosition::from(mouse_grid_pos.0);
+        if let Some(entity) = grid_map.get(GridLayer::Build, grid_pos) {
+            commands.entity(*entity).insert(AnimateTransform {
+                target_scale: Vec3::splat(0.0),
+                target_position: Vec3::new(
+                    grid_pos.x as f32 * GRID_SCALE,
+                    -0.5,
+                    grid_pos.y as f32 * GRID_SCALE,
+                ),
+                duration: 0.5,
+                elapsed: 0.0,
+                despawn_on_complete: true,
+                ..default()
+            });
         }
     }
 }
