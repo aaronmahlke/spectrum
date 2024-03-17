@@ -66,6 +66,9 @@ struct GridPosition {
 }
 
 #[derive(Component)]
+struct Laser;
+
+#[derive(Component)]
 struct Active;
 
 #[derive(Component)]
@@ -203,28 +206,6 @@ fn setup(
         Name::new("Floor"),
     ));
 
-    // Laser
-    commands.spawn((
-        PbrBundle {
-            mesh: cylinder_mesh.clone(),
-            material: materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                specular_transmission: 0.9,
-                diffuse_transmission: 1.0,
-                thickness: 1.8,
-                ior: 1.5,
-                perceptual_roughness: 0.12,
-                emissive: Color::ORANGE_RED * 10.0,
-                ..default()
-            }),
-            transform: Transform::from_xyz(1.0, 0.0, 0.0)
-                .with_scale(Vec3::new(0.03, 4.0, 0.03))
-                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-            ..default()
-        },
-        Name::new("Laser"),
-    ));
-
     // camera
     commands.spawn((
         Camera3dBundle {
@@ -342,44 +323,78 @@ fn place_collector(
             if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
                 commands.entity(well_entity).insert(Active);
 
-                commands.spawn((
-                    PbrBundle {
-                        mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
-                        material: materials.add(StandardMaterial {
-                            base_color: Color::WHITE,
-                            reflectance: 0.5,
-                            diffuse_transmission: 0.5,
-                            specular_transmission: 1.0,
-                            perceptual_roughness: 0.5,
-                            thickness: 4.0,
-                            ior: 1.18,
+                let collector = commands
+                    .spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
+                            material: materials.add(StandardMaterial {
+                                base_color: Color::WHITE,
+                                reflectance: 0.5,
+                                diffuse_transmission: 0.5,
+                                specular_transmission: 1.0,
+                                perceptual_roughness: 0.5,
+                                thickness: 4.0,
+                                ior: 1.18,
+                                ..default()
+                            }),
+                            transform: Transform::from_translation(Vec3::new(
+                                grid_pos.x as f32 * GRID_SCALE,
+                                -0.4,
+                                grid_pos.y as f32 * GRID_SCALE,
+                            )),
+                            ..Default::default()
+                        },
+                        AnimateTransform {
+                            target_position: Vec3::new(
+                                grid_pos.x as f32 * GRID_SCALE,
+                                0.5,
+                                grid_pos.y as f32 * GRID_SCALE,
+                            ),
+                            target_scale: Vec3::splat(1.0),
+                            duration: 1.5,
                             ..default()
-                        }),
-                        transform: Transform::from_translation(Vec3::new(
-                            grid_pos.x as f32 * GRID_SCALE,
-                            -0.4,
-                            grid_pos.y as f32 * GRID_SCALE,
-                        )),
-                        ..Default::default()
-                    },
-                    AnimateTransform {
-                        target_position: Vec3::new(
-                            grid_pos.x as f32 * GRID_SCALE,
-                            0.5,
-                            grid_pos.y as f32 * GRID_SCALE,
-                        ),
-                        target_scale: Vec3::splat(1.0),
-                        duration: 1.5,
-                        ..default()
-                    },
-                    GridPosition {
-                        x: grid_pos.x,
-                        y: grid_pos.y,
-                    },
-                    Building,
-                    Collector,
-                    Name::new("Collector"),
-                ));
+                        },
+                        GridPosition {
+                            x: grid_pos.x,
+                            y: grid_pos.y,
+                        },
+                        Building,
+                        Collector,
+                        Name::new("Collector"),
+                    ))
+                    .with_children(|parent| {
+                        let laser_length = 10.0;
+                        parent.spawn((
+                            PbrBundle {
+                                mesh: meshes.add(Cylinder::new(0.5, 2.0).mesh().resolution(50)),
+                                material: materials.add(StandardMaterial {
+                                    base_color: Color::WHITE,
+                                    reflectance: 0.5,
+                                    diffuse_transmission: 0.5,
+                                    specular_transmission: 1.0,
+                                    perceptual_roughness: 0.5,
+                                    thickness: 4.0,
+                                    ior: 1.18,
+                                    emissive: Color::ORANGE_RED * 40.0,
+                                    ..default()
+                                }),
+                                transform: Transform::from_translation(Vec3::new(0.0, 0.25, 0.0))
+                                    .with_scale(Vec3::new(0.04, 0.0, 0.04))
+                                    .with_rotation(Quat::from_rotation_x(
+                                        -std::f32::consts::FRAC_PI_2,
+                                    )),
+                                ..Default::default()
+                            },
+                            AnimateTransform {
+                                target_scale: Vec3::new(0.03, laser_length, 0.04),
+                                target_position: Vec3::new(0.0, 0.2, laser_length + 0.5),
+                                duration: 2.5,
+                                ..Default::default()
+                            },
+                            Laser,
+                            Name::new("Collector Laser"),
+                        ));
+                    });
             }
         }
     }
@@ -411,10 +426,6 @@ fn destoy_block_system(
     if buttons.just_pressed(MouseButton::Right) {
         println!("Right button was pressed");
         for (entity, grid_pos) in &q_grid_pos {
-            println!(
-                "Build block found at grid position {:?}, {:?}",
-                grid_pos.x, grid_pos.y
-            );
             if grid_pos.x as f32 == mouse_grid_pos.0.x && grid_pos.y as f32 == mouse_grid_pos.0.y {
                 commands.entity(entity).insert(AnimateTransform {
                     target_scale: Vec3::splat(0.0),
