@@ -46,6 +46,9 @@ fn main() {
         .insert_resource(GridMap::default());
     app.insert_state(AppState::InGame);
 
+    // events
+    app.add_event::<AnimationCompleteEvent>();
+
     // systems
     app.add_systems(Startup, setup);
     app.add_systems(OnEnter(AppState::InGame), (spawn_color_wells));
@@ -56,7 +59,8 @@ fn main() {
             update_cursor_attachment,
             place_collector,
             animate_transform_system,
-            destoy_block_system,
+            destroy_block_system,
+            on_building_destroy,
         )
             .run_if(in_state(AppState::InGame)),
     );
@@ -109,7 +113,6 @@ struct AnimateTransform {
     target_scale: Vec3,
     duration: f32,
     elapsed: f32,
-    despawn_on_complete: bool,
 }
 
 #[derive(Component)]
@@ -127,7 +130,6 @@ impl Default for AnimateTransform {
             target_position: Vec3::ZERO,
             duration: 0.5,
             elapsed: 0.0,
-            despawn_on_complete: false,
         }
     }
 }
@@ -484,23 +486,25 @@ fn place_collector(
     }
 }
 
+#[derive(Event)]
+struct AnimationCompleteEvent(Entity);
+
+#[derive(Component)]
+struct DeletionPending;
+
 fn animate_transform_system(
+    mut ev_despawn: EventWriter<AnimationCompleteEvent>,
     time: Res<Time>,
     mut grid_map: ResMut<GridMap>,
     mut commands: Commands,
-    mut query: Query<(Entity, &mut AnimateTransform, &mut Transform, &GridPosition)>,
+    mut query: Query<(Entity, &mut AnimateTransform, &mut Transform)>,
 ) {
-    for (entity, mut animation, mut transform, grid_position) in query.iter_mut() {
+    for (entity, mut animation, mut transform) in query.iter_mut() {
         animation.elapsed += time.delta_seconds();
         let t = animation.elapsed / animation.duration;
         if t >= 1.0 {
             commands.entity(entity).remove::<AnimateTransform>();
-
-            if animation.despawn_on_complete {
-                grid_map.remove(GridLayer::Build, *grid_position).unwrap();
-                commands.entity(entity)
-                    .despawn();
-            }
+            ev_despawn.send(AnimationCompleteEvent(entity));
         } else {
             transform.translation = transform.translation.lerp(animation.target_position, t);
             transform.scale = transform.scale.lerp(animation.target_scale, t);
@@ -508,7 +512,21 @@ fn animate_transform_system(
     }
 }
 
-fn destoy_block_system(
+fn on_building_destroy(
+    mut commands: Commands,
+    mut grid_map: ResMut<GridMap>,
+    mut ev_despawn: EventReader<AnimationCompleteEvent>,
+    q_grid_pos: Query<(Entity, &GridPosition), (With<Building>, With<DeletionPending>)>,
+) {
+    for ev in ev_despawn.read() {
+        if let Ok((entity, grid_position)) = q_grid_pos.get(ev.0) {
+            grid_map.remove(GridLayer::Build, *grid_position).unwrap();
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn destroy_block_system(
     mut commands: Commands,
     grid_map: Res<GridMap>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -519,7 +537,7 @@ fn destoy_block_system(
         println!("Right button was pressed");
         let grid_pos = GridPosition::from(mouse_grid_pos.0);
         if let Some(entity) = grid_map.get(GridLayer::Build, grid_pos) {
-            commands.entity(*entity).insert(AnimateTransform {
+            commands.entity(*entity).insert((AnimateTransform {
                 target_scale: Vec3::splat(0.0),
                 target_position: Vec3::new(
                     grid_pos.x as f32 * GRID_SCALE,
@@ -528,9 +546,8 @@ fn destoy_block_system(
                 ),
                 duration: 0.5,
                 elapsed: 0.0,
-                despawn_on_complete: true,
                 ..default()
-            });
+            }, DeletionPending));
         }
     }
 }
