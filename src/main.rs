@@ -22,7 +22,7 @@ fn main() {
     // plugins
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            title: "bevyaac".into(),
+            title: "spectrum".into(),
             present_mode: PresentMode::AutoNoVsync,
             prevent_default_event_handling: false,
             ..default()
