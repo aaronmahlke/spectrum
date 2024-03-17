@@ -12,8 +12,10 @@ use bevy::{
     window::{PresentMode, PrimaryWindow},
 };
 use bevy::utils::HashMap;
+use bevy_inspector_egui::InspectorOptions;
 
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use rand::random;
 use fps::FPSPlugin;
 mod fps;
 
@@ -61,9 +63,14 @@ fn main() {
             animate_transform_system,
             destroy_block_system,
             on_building_destroy,
+            animate_laser,
         )
             .run_if(in_state(AppState::InGame)),
     );
+
+    // types
+    app.register_type::<GridPosition>();
+
     app.run();
 }
 
@@ -77,7 +84,7 @@ enum AppState {
     InGame,
 }
 
-#[derive(Component, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Hash, Reflect, InspectorOptions)]
 struct GridPosition {
     x: i32,
     y: i32,
@@ -465,7 +472,7 @@ fn place_collector(
                                     ..default()
                                 }),
                                 transform: Transform::from_translation(Vec3::new(0.0, 0.25, 0.0))
-                                    .with_scale(Vec3::new(0.04, 0.0, 0.04))
+                                    .with_scale(Vec3::new(0.04, 0.0, 0.06))
                                     .with_rotation(Quat::from_rotation_x(
                                         -std::f32::consts::FRAC_PI_2,
                                     )),
@@ -510,6 +517,17 @@ fn animate_transform_system(
             transform.translation = transform.translation.lerp(animation.target_position, t);
             transform.scale = transform.scale.lerp(animation.target_scale, t);
         }
+    }
+}
+
+fn animate_laser(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<Laser>>,
+) {
+    for mut transform in &mut query {
+        transform.rotation *= Quat::from_rotation_y(
+           time.delta_seconds() * 5. * random::<f32>()
+        );
     }
 }
 
