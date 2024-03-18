@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+use bevy::pbr::NotShadowCaster;
 use bevy::utils::HashMap;
 use bevy::{
     diagnostic::FrameTimeDiagnosticsPlugin,
@@ -439,6 +440,7 @@ fn place_collector(
                             ..Default::default()
                         },
                         Laser,
+                        NotShadowCaster,
                         Name::new("Collector Laser"),
                     ));
                 });
