@@ -18,6 +18,8 @@ impl Plugin for LaserPlugin {
         app.add_event::<SpawnLaserEvent>();
 
         app.register_type::<Laser>();
+        app.register_type::<Intersection>();
+        app.register_type::<IntersectorType>();
     }
 }
 
@@ -46,7 +48,7 @@ impl Default for Laser {
     }
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Reflect, InspectorOptions)]
 struct Intersection {
     laser_in: Option<Entity>,
     laser_out: Option<Entity>,
@@ -64,7 +66,7 @@ pub enum UpdateType {
     Place,
 }
 
-#[derive(Debug, Component, Copy, Clone)]
+#[derive(Debug, Component, Copy, Clone, Reflect, PartialEq)]
 pub enum IntersectorType {
     Emitter,
     Reflector,
@@ -84,6 +86,7 @@ fn update_laser(
     mut grid: ResMut<GridMap>,
     q_laser: Query<(Entity, &Laser)>,
     mut ev_spawn_laser: EventWriter<SpawnLaserEvent>,
+    mut q_intersector_types: Query<&IntersectorType, With<Intersection>>,
 ) {
     for ev in events.read() {
         println!("LaserUpdateEvent: {:?}", ev);
@@ -100,6 +103,7 @@ fn update_laser(
                             Vec2::new(0.0, 1.0),
                             grid.borrow_mut(),
                             ev_spawn_laser.borrow_mut(),
+                            q_intersector_types.borrow_mut(),
                         );
                     }
                     IntersectorType::Reflector => {
@@ -139,26 +143,39 @@ fn walk_laser(
     direction: Vec2,
     grid: &mut ResMut<GridMap>,
     ev: &mut EventWriter<SpawnLaserEvent>,
+    q_intersector_types: &mut Query<&IntersectorType, With<Intersection>>,
 ) {
-    if index > 10 {
-        println!("Max index reached");
+    let start_pos = GridPosition {
+        x: (grid_pos.x - index as i32 * direction.x as i32),
+        y: (grid_pos.y - index as i32 * direction.y as i32),
+    };
 
-        return;
-    }
     let next_index = index + 1;
     let next_grid_pos = GridPosition {
         x: grid_pos.x + direction.x as i32,
         y: grid_pos.y + direction.y as i32,
     };
+
+    if index > 10 {
+        println!("Max index reached");
+        ev.send(SpawnLaserEvent {
+            laser_data: Laser {
+                source: Some(source),
+                from_intersector: Some(source),
+                to_intersector: None,
+                index: 0,
+                direction,
+                start: start_pos,
+                end: next_grid_pos,
+            },
+        });
+        return;
+    }
+
     // check if next grid_pos is a building
     if grid.contains(GridLayer::Build, next_grid_pos) {
         let entity = grid.get(GridLayer::Build, next_grid_pos).unwrap();
         println!("Building at {:?}", next_grid_pos);
-        let start_pos = GridPosition {
-            x: (grid_pos.x - index as i32 * direction.x as i32),
-            y: (grid_pos.y - index as i32 * direction.y as i32),
-        };
-
         ev.send(SpawnLaserEvent {
             laser_data: Laser {
                 source: Some(source),
@@ -171,9 +188,31 @@ fn walk_laser(
             },
         });
 
+        // if this building is a reflector, walk the laser again but with the new direction based on the reflector
+        if let Ok(intersector) = q_intersector_types.get(*entity) {
+            if *intersector == IntersectorType::Reflector {
+                walk_laser(
+                    0,
+                    *entity,
+                    next_grid_pos,
+                    direction,
+                    grid,
+                    ev,
+                    q_intersector_types,
+                );
+            }
+        }
         return;
     };
-    walk_laser(next_index, source, next_grid_pos, direction, grid, ev);
+    walk_laser(
+        next_index,
+        source,
+        next_grid_pos,
+        direction,
+        grid,
+        ev,
+        q_intersector_types,
+    );
 }
 
 fn spawn_laser_system(
@@ -181,18 +220,28 @@ fn spawn_laser_system(
     mut ev_spawn_laser: EventReader<SpawnLaserEvent>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    intersector_query: Query<&IntersectorType, With<Intersection>>,
 ) {
     for ev in ev_spawn_laser.read() {
-        println!("SpawnLaserEvent: {:?}", ev);
+        println!("SpawnLaserEvent recieved: {:?}", ev);
         let laser = spawn_laser(&mut commands, ev.laser_data, &mut meshes, &mut materials);
+        // add intersection component to previous building
+        if let Some(from_intersector) = ev.laser_data.from_intersector {
+            commands.entity(from_intersector).insert(Intersection {
+                laser_in: None,
+                laser_out: Some(laser),
+            });
+        }
 
         // add intersection component to intersecting building
-        commands
-            .entity(ev.laser_data.to_intersector.unwrap())
-            .insert(Intersection {
+        if let Some(to_intersector) = ev.laser_data.to_intersector {
+            commands.entity(to_intersector).insert(Intersection {
                 laser_in: Some(laser),
                 laser_out: None,
             });
+        };
+
+        // add laser component to laser entity
         commands.entity(laser).insert(ev.laser_data);
     }
 }

@@ -65,7 +65,6 @@ fn zoom_camera(
 
     let mut zoom_delta = 0.0;
     for event in ev_scroll.read() {
-        println!("{:?}", event);
         zoom_delta += event.y;
     }
 
