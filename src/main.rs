@@ -14,6 +14,7 @@ use camera::{CameraPlugin, MainCamera};
 use fps::FPSPlugin;
 use laser::*;
 use std::borrow::BorrowMut;
+use std::f32::consts::PI;
 
 mod camera;
 mod fps;
@@ -56,7 +57,7 @@ fn main() {
 
     // systems
     app.add_systems(Startup, setup);
-    app.add_systems(OnEnter(AppState::InGame), spawn_color_wells);
+    app.add_systems(OnEnter(AppState::InGame), (spawn_color_wells,));
     app.add_systems(
         Update,
         (
@@ -67,6 +68,7 @@ fn main() {
             destroy_block_system,
             on_building_destroy,
             update_current_placeable,
+            debug_gizmos,
         )
             .run_if(in_state(AppState::InGame)),
     );
@@ -177,6 +179,7 @@ enum GridLayer {
     Build,
     Laser,
 }
+
 #[derive(Resource, Default)]
 struct GridMap {
     map: HashMap<(GridLayer, GridPosition), Entity>,
@@ -208,6 +211,29 @@ impl GridMap {
     fn contains(&self, layer: GridLayer, position: GridPosition) -> bool {
         self.map.contains_key(&(layer, position))
     }
+}
+
+fn debug_gizmos(mut gizmos: Gizmos, grid: Res<GridMap>) {
+    for i in -100..100 {
+        for j in -100..100 {
+            let pos = Vec3::new(i as f32, 0.01, j as f32);
+            gizmos.rect(
+                pos,
+                Quat::from_rotation_x(PI / 2.),
+                Vec2::splat(GRID_SCALE),
+                Color::rgba(1.0, 1.0, 1.0, 0.1),
+            );
+        }
+    }
+}
+
+fn spawn_gltf(mut commands: Commands, ass: Res<AssetServer>) {
+    let gltf = ass.load("models/test.glb#Scene0");
+
+    commands.spawn(SceneBundle {
+        scene: gltf,
+        ..Default::default()
+    });
 }
 
 fn spawn_color_wells(
@@ -434,6 +460,7 @@ fn place_block(
     buttons: Res<ButtonInput<MouseButton>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    asset_server: Res<AssetServer>,
     inactive_color_wells: Query<
         (Entity, &GridPosition, &mut Handle<StandardMaterial>),
         With<ColorWell>,
@@ -459,14 +486,13 @@ fn place_block(
                         println!("Color well found");
                         let collector = spawn_collector(
                             commands.borrow_mut(),
+                            asset_server,
                             Vec3::new(
                                 grid_pos.x as f32 * GRID_SCALE,
                                 0.5,
                                 grid_pos.y as f32 * GRID_SCALE,
                             ),
                             grid_pos,
-                            meshes.borrow_mut(),
-                            materials.borrow_mut(),
                         );
                         ev_laser_update.send(LaserUpdateEvent {
                             entity: collector,
@@ -568,29 +594,19 @@ fn spawn_mirror(
 
 fn spawn_collector(
     commands: &mut Commands,
+    asset_server: Res<AssetServer>,
     position: Vec3,
     grid_pos: GridPosition,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
 ) -> Entity {
+    let gltf = asset_server.load("models/collector.glb#Scene0");
     let collector = (
-        PbrBundle {
-            mesh: meshes.add(Cuboid::new(0.95, 1.0, 0.95)),
-            material: materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                reflectance: 0.5,
-                diffuse_transmission: 0.5,
-                specular_transmission: 1.0,
-                perceptual_roughness: 0.5,
-                thickness: 4.0,
-                ior: 1.18,
-                ..default()
-            }),
+        SceneBundle {
+            scene: gltf,
             transform: Transform::from_translation(Vec3::new(position.x, -0.4, position.z)),
             ..Default::default()
         },
         AnimateTransform {
-            target_position: Vec3::new(grid_to_world(&grid_pos).x, 0.5, grid_to_world(&grid_pos).y),
+            target_position: Vec3::new(grid_to_world(&grid_pos).x, 0.0, grid_to_world(&grid_pos).y),
             target_scale: Vec3::splat(1.0),
             duration: 1.5,
             ..default()

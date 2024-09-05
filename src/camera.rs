@@ -38,7 +38,19 @@ fn move_camera_system(
 
     if input_mouse.pressed(MouseButton::Right) {
         for (mut transform, projection) in &mut query {
+            println!("Delta: {:?}", pan);
+            println!("Window: {:?}", window);
             if let Projection::Orthographic(projection) = projection {
+                // println!("Projection area: {:?}", projection.area);
+                // println!(
+                //     "Width/Height: {:?} / {:?}",
+                //     projection.area.width(),
+                //     projection.area.height()
+                // );
+                // println!(
+                //     "Magic: {:?}",
+                //     Vec2::new(projection.area.width(), projection.area.height()) / window
+                // );
                 pan *= Vec2::new(projection.area.width(), projection.area.height()) / window;
             }
 
@@ -48,7 +60,13 @@ fn move_camera_system(
 
             let right = transform.rotation * Vec3::X * -pan.x;
             let up = transform.rotation * Vec3::Y * pan.y;
+
+            println!("Rotation: {:?}", transform.rotation);
+            println!("Right: {:?}", right);
+            println!("Up: {:?}", up);
+
             let translation = right + up;
+            // println!("Translation: {:?}", translation);
 
             transform.translation += translation;
         }
@@ -92,7 +110,6 @@ fn spawn_camera(mut commands: Commands) {
                 hdr: true,
                 ..default()
             },
-
             transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
             projection: Projection::Orthographic(OrthographicProjection {
                 scaling_mode: ScalingMode::FixedVertical(1.0),
